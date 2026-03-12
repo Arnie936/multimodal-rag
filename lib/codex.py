@@ -1,21 +1,22 @@
 import os
-from openai import OpenAI
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
 load_dotenv()
 
-_client: OpenAI | None = None
+_client: genai.Client | None = None
 
 
-def get_client() -> OpenAI:
+def get_client() -> genai.Client:
     global _client
     if _client is None:
-        _client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+        _client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     return _client
 
 
 def reason(query: str, context_chunks: list[dict]) -> str:
-    """Send query + retrieved context to OpenAI o4-mini for reasoning."""
+    """Send query + retrieved context to Gemini Flash Lite for reasoning."""
     context_parts = []
     for i, chunk in enumerate(context_chunks, 1):
         source = chunk.get("original_filename", "unknown")
@@ -27,23 +28,17 @@ def reason(query: str, context_chunks: list[dict]) -> str:
         )
     context_str = "\n\n---\n\n".join(context_parts)
 
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are a helpful assistant that answers questions based on the provided context. "
-                "Cite your sources by referencing the source numbers [Source N]. "
-                "If the context doesn't contain enough information, say so clearly."
-            ),
-        },
-        {
-            "role": "user",
-            "content": f"Context:\n{context_str}\n\nQuestion: {query}",
-        },
-    ]
-
-    response = get_client().chat.completions.create(
-        model="o4-mini",
-        messages=messages,
+    system_instruction = (
+        "You are a helpful assistant that answers questions based on the provided context. "
+        "Cite your sources by referencing the source numbers [Source N]. "
+        "If the context doesn't contain enough information, say so clearly."
     )
-    return response.choices[0].message.content
+
+    response = get_client().models.generate_content(
+        model="gemini-3.1-flash-lite-preview",
+        contents=f"Context:\n{context_str}\n\nQuestion: {query}",
+        config=types.GenerateContentConfig(
+            system_instruction=system_instruction,
+        ),
+    )
+    return response.text
