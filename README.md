@@ -1,37 +1,67 @@
 # Multimodal RAG with Gemini Embedding
 
-A RAG application that embeds text, images, video, audio, and PDFs using Google's Gemini Embedding model, stores vectors in Supabase (pgvector), and uses OpenAI o4-mini for reasoning.
+A Retrieval-Augmented Generation application that embeds multiple content types — text, images, video, audio, and PDFs — using Google's Gemini Embedding 2 model, stores vectors in Supabase (pgvector), and uses OpenAI o4-mini for reasoning. Built as a single Streamlit app.
 
 ## Setup
 
 1. Install dependencies:
-   ```
+   ```bash
    pip install -r requirements.txt
    ```
 
-2. Fill in your API keys in `.env`:
+2. Create a `.env` file with your API keys:
    ```
    GEMINI_API_KEY=your-key
    OPENAI_API_KEY=your-key
+   SUPABASE_URL=https://your-project.supabase.co
    SUPABASE_SERVICE_KEY=your-key
    ```
 
 3. Run the app:
-   ```
+   ```bash
    streamlit run app.py
    ```
 
 ## Features
 
-- **Upload & Embed** — Upload text, images, PDFs, audio, or video. Files are automatically chunked if they exceed size limits and embedded via Gemini.
-- **Search** — Enter a natural language query. Results are retrieved by vector similarity and optionally passed to OpenAI o4-mini for a synthesized answer with source citations.
-- **Browse** — View and delete all stored documents.
+### Upload & Embed
+- Upload one or multiple files at once (text, images, PDFs, audio, video)
+- Files that exceed size limits are automatically chunked:
+  - **Text**: ~6000 token chunks with 500 token overlap
+  - **PDF**: 5-page chunks via PyMuPDF
+  - **Audio**: 75-second segments via pydub
+  - **Video**: 120-second segments via moviepy
+- All embeddings are L2-normalized before storage
+
+### Search
+- Natural language queries embedded with `RETRIEVAL_QUERY` task type
+- Vector similarity search via Supabase RPC (cosine distance)
+- Configurable top-k and similarity threshold
+- Filter results by content type
+- Images are displayed inline in search results
+- Optional reasoning via OpenAI o4-mini with source citations
+
+### Browse
+- View all stored documents in a table
+- Delete documents by ID
+
+## Architecture
+
+```
+app.py              Streamlit GUI (upload, search, browse tabs)
+lib/
+├── embedder.py     Gemini Embedding 2 (3072 dims) for all content types
+├── chunker.py      Content-aware chunking (text, PDF, audio, video)
+├── db.py           Supabase vector operations (insert, search, stats)
+├── rag.py          RAG pipeline orchestration (ingest + query)
+└── codex.py        OpenAI o4-mini reasoning with source citations
+```
 
 ## Tech Stack
 
 | Component | Technology |
 |-----------|------------|
-| Embeddings | Gemini Embedding (768 dims) |
+| Embeddings | Gemini Embedding 2 Preview (3072 dims) |
 | Vector DB | Supabase + pgvector |
 | Reasoning | OpenAI o4-mini |
 | GUI | Streamlit |
