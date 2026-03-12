@@ -145,6 +145,7 @@ def ingest(
         for i, chunk_bytes in enumerate(video_chunks):
             _progress(f"Embedding video chunk {i+1}/{total}")
             vec = embedder.embed_video(chunk_bytes, mime_type=mime_type)
+            b64 = base64.b64encode(chunk_bytes).decode("ascii")
             row = db.insert_document(
                 title=title,
                 content_type="video",
@@ -152,8 +153,9 @@ def ingest(
                 chunk_index=i,
                 chunk_total=total,
                 text_content=None,
-                metadata={"format": suffix, "chunk_seconds": 120},
+                metadata={"format": suffix, "chunk_seconds": 120, "mime_type": mime_type},
                 embedding=vec,
+                file_data=b64,
             )
             results.append(row)
 

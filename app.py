@@ -121,11 +121,15 @@ with tab_search:
                 with st.expander(
                     f"[{sim:.3f}] {src['title']} — {src['original_filename']} "
                     f"(chunk {src['chunk_index']}/{src['chunk_total']}, {src['content_type']})",
-                    expanded=src["content_type"] == "image",
+                    expanded=src["content_type"] in ("image", "video"),
                 ):
                     if src["content_type"] == "image" and src.get("file_data"):
                         img_bytes = base64.b64decode(src["file_data"])
                         st.image(img_bytes, caption=src["original_filename"], use_container_width=True)
+                    elif src["content_type"] == "video" and src.get("file_data"):
+                        vid_bytes = base64.b64decode(src["file_data"])
+                        mime = (src.get("metadata") or {}).get("mime_type", "video/mp4")
+                        st.video(vid_bytes, format=mime)
                     elif src.get("text_content"):
                         st.text(src["text_content"][:2000])
                     else:
