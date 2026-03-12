@@ -1,0 +1,86 @@
+import os
+from supabase import create_client, Client
+from dotenv import load_dotenv
+
+load_dotenv()
+
+_client: Client | None = None
+
+
+def get_client() -> Client:
+    global _client
+    if _client is None:
+        _client = create_client(
+            os.environ["SUPABASE_URL"],
+            os.environ["SUPABASE_SERVICE_KEY"],
+        )
+    return _client
+
+
+def insert_document(
+    title: str,
+    content_type: str,
+    original_filename: str,
+    chunk_index: int,
+    chunk_total: int,
+    text_content: str | None,
+    metadata: dict,
+    embedding: list[float],
+    file_data: str | None = None,
+) -> dict:
+    row = {
+        "title": title,
+        "content_type": content_type,
+        "original_filename": original_filename,
+        "chunk_index": chunk_index,
+        "chunk_total": chunk_total,
+        "text_content": text_content,
+        "metadata": metadata,
+        "embedding": embedding,
+        "file_data": file_data,
+    }
+    result = get_client().table("documents").insert(row).execute()
+    return result.data[0]
+
+
+def search_documents(
+    query_embedding: list[float],
+    match_threshold: float = 0.5,
+    match_count: int = 10,
+    filter_type: str | None = None,
+) -> list[dict]:
+    result = get_client().rpc(
+        "match_documents",
+        {
+            "query_embedding": query_embedding,
+            "match_threshold": match_threshold,
+            "match_count": match_count,
+            "filter_type": filter_type,
+        },
+    ).execute()
+    return result.data
+
+
+def get_all_documents() -> list[dict]:
+    result = (
+        get_client()
+        .table("documents")
+        .select("id, title, content_type, original_filename, chunk_index, chunk_total, created_at")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return result.data
+
+
+def delete_document(doc_id: str) -> None:
+    get_client().table("documents").delete().eq("id", doc_id).execute()
+
+
+def get_stats() -> dict:
+    rows = get_all_documents()
+    total = len(rows)
+    by_type: dict[str, int] = {}
+    for r in rows:
+        ct = r["content_type"]
+        by_type[ct] = by_type.get(ct, 0) + 1
+    return {"total": total, "by_type": by_type}

@@ -1,0 +1,8 @@
+.env
+uploads/
+__pycache__/
+*.pyc
+.streamlit/
+.claude/
+.mcp.json
+.playwright-cli/

@@ -1,0 +1,9 @@
+streamlit>=1.40.0
+google-genai>=1.0.0
+openai>=1.60.0
+supabase>=2.11.0
+python-dotenv>=1.0.1
+PyMuPDF>=1.25.0
+pydub>=0.25.1
+moviepy>=2.1.0
+numpy>=1.26.0
