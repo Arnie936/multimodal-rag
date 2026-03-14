@@ -34,7 +34,7 @@ def insert_document(
         "original_filename": original_filename,
         "chunk_index": chunk_index,
         "chunk_total": chunk_total,
-        "text_content": text_content,
+        "text_content": text_content.replace("\x00", "") if text_content else text_content,
         "metadata": metadata,
         "embedding": embedding,
         "file_data": file_data,
@@ -70,6 +70,18 @@ def get_all_documents() -> list[dict]:
         .execute()
     )
     return result.data
+
+
+def get_existing_chunks(original_filename: str) -> set[int]:
+    """Return set of chunk_indices already stored for this filename."""
+    result = (
+        get_client()
+        .table("documents")
+        .select("chunk_index")
+        .eq("original_filename", original_filename)
+        .execute()
+    )
+    return {r["chunk_index"] for r in result.data}
 
 
 def delete_document(doc_id: str) -> None:

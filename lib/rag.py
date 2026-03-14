@@ -1,6 +1,6 @@
 from __future__ import annotations
 import base64
-from lib import embedder, db, codex, chunker
+from lib import embedder, db, reasoning, chunker
 
 MIME_MAP = {
     "image/png": "image",
@@ -58,18 +58,22 @@ def ingest(
 ) -> list[dict]:
     """Embed and store a file. Returns list of inserted document rows."""
     content_type = detect_content_type(mime_type, filename)
+    existing = db.get_existing_chunks(filename)
     results = []
 
-    def _progress(msg: str):
+    def _progress(msg: str, current: int = 0, total: int = 1):
         if on_progress:
-            on_progress(msg)
+            on_progress(msg, current, total)
 
     if content_type == "text":
         text = file_bytes.decode("utf-8", errors="replace")
         chunks = chunker.chunk_text(text)
         total = len(chunks)
         for i, chunk_text in enumerate(chunks):
-            _progress(f"Embedding text chunk {i+1}/{total}")
+            if i in existing:
+                _progress(f"Skipping text chunk {i+1}/{total} (exists)", i + 1, total)
+                continue
+            _progress(f"Embedding text chunk {i+1}/{total}", i + 1, total)
             vec = embedder.embed_text(chunk_text)
             row = db.insert_document(
                 title=title,
@@ -84,27 +88,33 @@ def ingest(
             results.append(row)
 
     elif content_type == "image":
-        _progress("Embedding image")
-        vec = embedder.embed_image(file_bytes, mime_type=mime_type)
-        b64 = base64.b64encode(file_bytes).decode("ascii")
-        row = db.insert_document(
-            title=title,
-            content_type="image",
-            original_filename=filename,
-            chunk_index=0,
-            chunk_total=1,
-            text_content=None,
-            metadata={"mime_type": mime_type, "size_bytes": len(file_bytes)},
-            embedding=vec,
-            file_data=b64,
-        )
-        results.append(row)
+        if 0 in existing:
+            _progress("Skipping image (exists)", 1, 1)
+        else:
+            _progress("Embedding image", 1, 1)
+            vec = embedder.embed_image(file_bytes, mime_type=mime_type)
+            b64 = base64.b64encode(file_bytes).decode("ascii")
+            row = db.insert_document(
+                title=title,
+                content_type="image",
+                original_filename=filename,
+                chunk_index=0,
+                chunk_total=1,
+                text_content=None,
+                metadata={"mime_type": mime_type, "size_bytes": len(file_bytes)},
+                embedding=vec,
+                file_data=b64,
+            )
+            results.append(row)
 
     elif content_type == "pdf":
         pdf_chunks = chunker.chunk_pdf(file_bytes)
         total = len(pdf_chunks)
         for i, pdf_bytes in enumerate(pdf_chunks):
-            _progress(f"Embedding PDF chunk {i+1}/{total}")
+            if i in existing:
+                _progress(f"Skipping PDF chunk {i+1}/{total} (exists)", i + 1, total)
+                continue
+            _progress(f"Embedding PDF chunk {i+1}/{total}", i + 1, total)
             text = chunker.extract_pdf_text(pdf_bytes)
             vec = embedder.embed_pdf_page_bytes(pdf_bytes)
             row = db.insert_document(
@@ -124,7 +134,10 @@ def ingest(
         audio_chunks = chunker.chunk_audio(file_bytes, fmt=fmt)
         total = len(audio_chunks)
         for i, chunk_bytes in enumerate(audio_chunks):
-            _progress(f"Embedding audio chunk {i+1}/{total}")
+            if i in existing:
+                _progress(f"Skipping audio chunk {i+1}/{total} (exists)", i + 1, total)
+                continue
+            _progress(f"Embedding audio chunk {i+1}/{total}", i + 1, total)
             vec = embedder.embed_audio(chunk_bytes, mime_type=mime_type)
             row = db.insert_document(
                 title=title,
@@ -143,7 +156,10 @@ def ingest(
         video_chunks = chunker.chunk_video(file_bytes, suffix=suffix)
         total = len(video_chunks)
         for i, chunk_bytes in enumerate(video_chunks):
-            _progress(f"Embedding video chunk {i+1}/{total}")
+            if i in existing:
+                _progress(f"Skipping video chunk {i+1}/{total} (exists)", i + 1, total)
+                continue
+            _progress(f"Embedding video chunk {i+1}/{total}", i + 1, total)
             vec = embedder.embed_video(chunk_bytes, mime_type=mime_type)
             b64 = base64.b64encode(chunk_bytes).decode("ascii")
             row = db.insert_document(
@@ -167,7 +183,7 @@ def query(
     top_k: int = 10,
     threshold: float = 0.5,
     filter_type: str | None = None,
-    use_codex: bool = True,
+    use_reasoning: bool = True,
 ) -> dict:
     """Run the full RAG pipeline: embed query -> search -> reason."""
     query_vec = embedder.embed_query(query_text)
@@ -178,6 +194,6 @@ def query(
         filter_type=filter_type if filter_type != "all" else None,
     )
     answer = None
-    if use_codex and matches:
-        answer = codex.reason(query_text, matches)
+    if use_reasoning and matches:
+        answer = reasoning.reason(query_text, matches)
     return {"answer": answer, "sources": matches}

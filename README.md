@@ -53,7 +53,7 @@ lib/
 ├── chunker.py      Content-aware chunking (text, PDF, audio, video)
 ├── db.py           Supabase vector operations (insert, search, stats)
 ├── rag.py          RAG pipeline orchestration (ingest + query)
-└── codex.py        Gemini 3.1 Flash Lite reasoning with source citations
+└── reasoning.py    Gemini 3.1 Flash Lite reasoning with source citations
 ```
 
 ## Tech Stack
