@@ -27,6 +27,7 @@ def insert_document(
     metadata: dict,
     embedding: list[float],
     file_data: str | None = None,
+    collection: str = "default",
 ) -> dict:
     row = {
         "title": title,
@@ -38,6 +39,7 @@ def insert_document(
         "metadata": metadata,
         "embedding": embedding,
         "file_data": file_data,
+        "collection": collection,
     }
     result = get_client().table("documents").insert(row).execute()
     return result.data[0]
@@ -48,6 +50,7 @@ def search_documents(
     match_threshold: float = 0.5,
     match_count: int = 10,
     filter_type: str | None = None,
+    filter_collection: str | None = None,
 ) -> list[dict]:
     result = get_client().rpc(
         "match_documents",
@@ -56,6 +59,7 @@ def search_documents(
             "match_threshold": match_threshold,
             "match_count": match_count,
             "filter_type": filter_type,
+            "filter_collection": filter_collection,
         },
     ).execute()
     return result.data
@@ -65,11 +69,22 @@ def get_all_documents() -> list[dict]:
     result = (
         get_client()
         .table("documents")
-        .select("id, title, content_type, original_filename, chunk_index, chunk_total, created_at")
+        .select("id, title, content_type, original_filename, chunk_index, chunk_total, collection, created_at")
         .order("created_at", desc=True)
         .execute()
     )
     return result.data
+
+
+def get_collections() -> list[str]:
+    """Return sorted list of distinct collection names."""
+    result = (
+        get_client()
+        .table("documents")
+        .select("collection")
+        .execute()
+    )
+    return sorted(set(r["collection"] for r in result.data))
 
 
 def get_existing_chunks(original_filename: str) -> set[int]:

@@ -55,6 +55,7 @@ def ingest(
     filename: str,
     title: str,
     mime_type: str,
+    collection: str = "default",
     on_progress=None,
 ) -> list[dict]:
     """Embed and store a file. Returns list of inserted document rows."""
@@ -85,6 +86,7 @@ def ingest(
                 text_content=chunk_text,
                 metadata={"char_count": len(chunk_text)},
                 embedding=vec,
+                collection=collection,
             )
             results.append(row)
 
@@ -104,6 +106,7 @@ def ingest(
                 text_content=None,
                 metadata={"mime_type": mime_type, "size_bytes": len(file_bytes)},
                 embedding=vec,
+                collection=collection,
                 file_data=b64,
             )
             results.append(row)
@@ -128,6 +131,7 @@ def ingest(
                 text_content=text[:10000] if text else None,
                 metadata={"chunk_pages": page_count},
                 embedding=vec,
+                collection=collection,
             )
             results.append(row)
 
@@ -150,6 +154,7 @@ def ingest(
                 text_content=None,
                 metadata={"format": fmt, "chunk_seconds": 75},
                 embedding=vec,
+                collection=collection,
             )
             results.append(row)
 
@@ -173,6 +178,7 @@ def ingest(
                 text_content=None,
                 metadata={"format": suffix, "chunk_seconds": 120, "mime_type": mime_type},
                 embedding=vec,
+                collection=collection,
                 file_data=b64,
             )
             results.append(row)
@@ -185,6 +191,7 @@ def query(
     top_k: int = 10,
     threshold: float = 0.5,
     filter_type: str | None = None,
+    filter_collection: str | None = None,
     use_reasoning: bool = True,
 ) -> dict:
     """Run the full RAG pipeline: embed query -> search -> reason."""
@@ -194,6 +201,7 @@ def query(
         match_threshold=threshold,
         match_count=top_k,
         filter_type=filter_type if filter_type != "all" else None,
+        filter_collection=filter_collection if filter_collection != "all" else None,
     )
     answer = None
     if use_reasoning and matches:

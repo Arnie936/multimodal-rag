@@ -18,6 +18,16 @@ with st.sidebar:
         "Content type filter",
         ["all", "text", "image", "pdf", "audio", "video"],
     )
+
+    try:
+        collections = db.get_collections()
+    except Exception:
+        collections = []
+    filter_collection = st.selectbox(
+        "Collection filter",
+        ["all"] + collections,
+    )
+
     use_reasoning = st.checkbox("Use reasoning", value=True)
 
     st.divider()
@@ -49,8 +59,11 @@ with tab_upload:
         accept_multiple_files=True,
     )
     title = st.text_input("Document title (applied to all files)", placeholder="My document")
+    col_choice = st.selectbox("Collection", collections + ["+ New collection..."], key="upload_col")
+    if col_choice == "+ New collection...":
+        col_choice = st.text_input("New collection name")
 
-    if uploaded_files and title:
+    if uploaded_files and title and col_choice:
         if st.button("Embed & Store", type="primary"):
             total_stored = 0
             for file_idx, uploaded in enumerate(uploaded_files):
@@ -70,6 +83,7 @@ with tab_upload:
                         filename=uploaded.name,
                         title=title,
                         mime_type=mime,
+                        collection=col_choice,
                         on_progress=on_progress,
                     )
                     progress_bar.progress(100)
@@ -80,8 +94,8 @@ with tab_upload:
                     raise
             st.success(f"Stored {total_stored} chunk(s) across {len(uploaded_files)} file(s)")
             st.cache_data.clear()
-    elif uploaded_files and not title:
-        st.warning("Please enter a document title.")
+    elif uploaded_files and (not title or not col_choice):
+        st.warning("Please enter a document title and select a collection.")
 
 # ── Tab 2: Search ───────────────────────────────────────────────────────────
 with tab_search:
@@ -99,6 +113,7 @@ with tab_search:
                         top_k=top_k,
                         threshold=threshold,
                         filter_type=filter_type,
+                        filter_collection=filter_collection,
                         use_reasoning=use_reasoning,
                     )
                 except Exception as e:
@@ -157,6 +172,7 @@ with tab_browse:
                 "original_filename": st.column_config.TextColumn("Filename"),
                 "chunk_index": st.column_config.NumberColumn("Chunk"),
                 "chunk_total": st.column_config.NumberColumn("Total"),
+                "collection": st.column_config.TextColumn("Collection"),
                 "created_at": st.column_config.TextColumn("Created"),
             },
         )
