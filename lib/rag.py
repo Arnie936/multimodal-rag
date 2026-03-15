@@ -1,5 +1,6 @@
 from __future__ import annotations
 import base64
+import fitz
 from lib import embedder, db, reasoning, chunker
 
 MIME_MAP = {
@@ -116,6 +117,7 @@ def ingest(
                 continue
             _progress(f"Embedding PDF chunk {i+1}/{total}", i + 1, total)
             text = chunker.extract_pdf_text(pdf_bytes)
+            page_count = len(fitz.open(stream=pdf_bytes, filetype="pdf"))
             vec = embedder.embed_pdf_page_bytes(pdf_bytes)
             row = db.insert_document(
                 title=title,
@@ -124,7 +126,7 @@ def ingest(
                 chunk_index=i,
                 chunk_total=total,
                 text_content=text[:10000] if text else None,
-                metadata={"chunk_pages": len(pdf_bytes)},
+                metadata={"chunk_pages": page_count},
                 embedding=vec,
             )
             results.append(row)

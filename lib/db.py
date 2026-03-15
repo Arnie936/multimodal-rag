@@ -88,6 +88,18 @@ def delete_document(doc_id: str) -> None:
     get_client().table("documents").delete().eq("id", doc_id).execute()
 
 
+def delete_by_filename(original_filename: str) -> int:
+    """Delete all chunks for a given filename. Returns count of deleted rows."""
+    result = (
+        get_client()
+        .table("documents")
+        .delete()
+        .eq("original_filename", original_filename)
+        .execute()
+    )
+    return len(result.data)
+
+
 def get_stats() -> dict:
     rows = get_all_documents()
     total = len(rows)

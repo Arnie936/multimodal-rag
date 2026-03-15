@@ -64,7 +64,7 @@ with tab_upload:
                 try:
                     file_bytes = uploaded.read()
                     mime = uploaded.type or "application/octet-stream"
-                    status_text.text("Processing...")
+                    status_text.text("Chunking...")
                     results = rag.ingest(
                         file_bytes=file_bytes,
                         filename=uploaded.name,
@@ -163,8 +163,21 @@ with tab_browse:
 
         st.divider()
         st.subheader("Delete documents")
-        delete_id = st.text_input("Document ID to delete")
-        if st.button("Delete", type="secondary"):
+
+        filenames = sorted(set(d["original_filename"] for d in docs))
+        delete_file = st.selectbox("Delete all chunks of a file", [""] + filenames)
+        if st.button("Delete file", type="secondary"):
+            if delete_file:
+                try:
+                    count = db.delete_by_filename(delete_file)
+                    st.success(f"Deleted {count} chunk(s) of {delete_file}")
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Delete error: {e}")
+
+        delete_id = st.text_input("Or delete single chunk by ID")
+        if st.button("Delete by ID", type="secondary"):
             if delete_id.strip():
                 try:
                     db.delete_document(delete_id.strip())
