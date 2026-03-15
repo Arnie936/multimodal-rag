@@ -4,13 +4,130 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from lib import db, rag
+from lib import db, rag, auth
 
 st.set_page_config(page_title="Multimodal RAG", page_icon="🔍", layout="wide")
+
+# ── Auth Gate ─────────────────────────────────────────────────────────────────
+
+def render_auth_page():
+    st.title("Multimodal RAG — Login")
+    tab_login, tab_register = st.tabs(["Login", "Registrieren"])
+
+    with tab_login:
+        email = st.text_input("E-Mail", key="login_email")
+        password = st.text_input("Passwort", type="password", key="login_pw")
+        if st.button("Login", type="primary"):
+            if email and password:
+                result = auth.login(email, password)
+                if result["error"]:
+                    st.error(result["error"])
+                else:
+                    st.session_state["access_token"] = result["session"].access_token
+                    st.session_state["user_id"] = result["user"].id
+                    st.session_state["user_email"] = result["user"].email
+                    st.rerun()
+            else:
+                st.warning("Bitte E-Mail und Passwort eingeben.")
+
+    with tab_register:
+        reg_email = st.text_input("E-Mail", key="reg_email")
+        reg_pw = st.text_input("Passwort", type="password", key="reg_pw")
+        if st.button("Registrieren", type="primary"):
+            if reg_email and reg_pw:
+                result = auth.register(reg_email, reg_pw)
+                if result["error"]:
+                    st.error(result["error"])
+                else:
+                    st.success("Registrierung erfolgreich! Bitte E-Mail bestätigen und dann einloggen.")
+            else:
+                st.warning("Bitte E-Mail und Passwort eingeben.")
+
+
+if "access_token" not in st.session_state:
+    render_auth_page()
+    st.stop()
+
+# ── Authenticated context ─────────────────────────────────────────────────────
+
+access_token = st.session_state["access_token"]
+user_id = st.session_state["user_id"]
+authed_client = auth.get_authed_db_client(access_token)
+
+# Load LLM settings once per session
+if "llm_settings" not in st.session_state:
+    saved = db.get_user_settings(authed_client, user_id)
+    if saved:
+        st.session_state["llm_settings"] = {
+            "provider": saved["llm_provider"],
+            "model": saved["llm_model"],
+            "api_key": saved["llm_api_key"],
+            "ollama_url": saved["ollama_url"],
+        }
+    else:
+        st.session_state["llm_settings"] = {
+            "provider": "gemini",
+            "model": "gemini-2.0-flash-lite",
+            "api_key": "",
+            "ollama_url": "http://localhost:11434",
+        }
+
 st.title("Multimodal RAG with Gemini Embedding")
 
-# ── Sidebar ──────────────────────────────────────────────────────────────────
+# ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
+    st.caption(f"Eingeloggt als **{st.session_state['user_email']}**")
+    if st.button("Logout"):
+        auth.logout(access_token)
+        for key in ["access_token", "user_id", "user_email", "llm_settings"]:
+            st.session_state.pop(key, None)
+        st.rerun()
+
+    st.divider()
+    st.header("LLM-Einstellungen")
+
+    current = st.session_state["llm_settings"]
+    providers = ["gemini", "openai", "anthropic", "ollama"]
+    provider = st.selectbox(
+        "Provider",
+        providers,
+        index=providers.index(current["provider"]) if current["provider"] in providers else 0,
+    )
+    model_defaults = {
+        "gemini": "gemini-2.0-flash-lite",
+        "openai": "o4-mini",
+        "anthropic": "claude-sonnet-4-5",
+        "ollama": "llama3",
+    }
+    model = st.text_input("Modell", value=current.get("model") or model_defaults.get(provider, ""))
+    api_key_input = st.text_input(
+        "API Key",
+        type="password",
+        value=current.get("api_key", ""),
+        help="Nicht erforderlich für Ollama",
+    )
+    ollama_url = ""
+    if provider == "ollama":
+        ollama_url = st.text_input(
+            "Ollama URL",
+            value=current.get("ollama_url", "http://localhost:11434"),
+        )
+
+    if st.button("Einstellungen speichern"):
+        new_settings = {
+            "provider": provider,
+            "model": model,
+            "api_key": api_key_input,
+            "ollama_url": ollama_url,
+        }
+        try:
+            db.upsert_user_settings(authed_client, user_id, new_settings)
+            st.session_state["llm_settings"] = new_settings
+            st.success("Gespeichert")
+        except Exception as e:
+            st.error(f"Fehler beim Speichern: {e}")
+
+    st.divider()
     st.header("Settings")
     top_k = st.slider("Top K results", 1, 50, 10)
     threshold = st.slider("Similarity threshold", 0.0, 1.0, 0.5, 0.05)
@@ -18,7 +135,7 @@ with st.sidebar:
         "Content type filter",
         ["all", "text", "image", "pdf", "audio", "video"],
     )
-    use_codex = st.checkbox("Use Codex reasoning", value=True)
+    use_codex = st.checkbox("Use LLM reasoning", value=True)
 
     st.divider()
     st.header("Database Stats")
@@ -26,21 +143,23 @@ with st.sidebar:
         st.cache_data.clear()
 
     @st.cache_data(ttl=30)
-    def _stats():
-        return db.get_stats()
+    def _stats(uid: str):
+        return db.get_stats(authed_client=auth.get_authed_db_client(
+            st.session_state.get("access_token", "")
+        ))
 
     try:
-        stats = _stats()
+        stats = _stats(user_id)
         st.metric("Total documents", stats["total"])
         for ctype, count in stats["by_type"].items():
             st.metric(ctype.capitalize(), count)
     except Exception as e:
         st.error(f"Could not load stats: {e}")
 
-# ── Tabs ─────────────────────────────────────────────────────────────────────
+# ── Tabs ──────────────────────────────────────────────────────────────────────
 tab_upload, tab_search, tab_browse = st.tabs(["Upload & Embed", "Search", "Browse"])
 
-# ── Tab 1: Upload & Embed ───────────────────────────────────────────────────
+# ── Tab 1: Upload & Embed ─────────────────────────────────────────────────────
 with tab_upload:
     st.subheader("Upload files to embed")
     uploaded_files = st.file_uploader(
@@ -74,6 +193,8 @@ with tab_upload:
                         title=title,
                         mime_type=mime,
                         on_progress=on_progress,
+                        authed_client=authed_client,
+                        user_id=user_id,
                     )
                     progress_bar.progress(100)
                     status_text.text("Done!")
@@ -86,7 +207,7 @@ with tab_upload:
     elif uploaded_files and not title:
         st.warning("Please enter a document title.")
 
-# ── Tab 2: Search ───────────────────────────────────────────────────────────
+# ── Tab 2: Search ─────────────────────────────────────────────────────────────
 with tab_search:
     st.subheader("Query your documents")
     query_text = st.text_area("Enter your query", height=100)
@@ -103,6 +224,8 @@ with tab_search:
                         threshold=threshold,
                         filter_type=filter_type,
                         use_codex=use_codex,
+                        authed_client=authed_client,
+                        llm_settings=st.session_state["llm_settings"] if use_codex else None,
                     )
                 except Exception as e:
                     st.error(f"Search error: {e}")
@@ -137,12 +260,12 @@ with tab_search:
                     if src.get("metadata"):
                         st.json(src["metadata"])
 
-# ── Tab 3: Browse ───────────────────────────────────────────────────────────
+# ── Tab 3: Browse ─────────────────────────────────────────────────────────────
 with tab_browse:
     st.subheader("All documents")
 
     try:
-        docs = db.get_all_documents()
+        docs = db.get_all_documents(authed_client=authed_client)
     except Exception as e:
         st.error(f"Error loading documents: {e}")
         docs = []
@@ -170,7 +293,7 @@ with tab_browse:
         if st.button("Delete", type="secondary"):
             if delete_id.strip():
                 try:
-                    db.delete_document(delete_id.strip())
+                    db.delete_document(delete_id.strip(), authed_client=authed_client)
                     st.success(f"Deleted {delete_id}")
                     st.cache_data.clear()
                     st.rerun()

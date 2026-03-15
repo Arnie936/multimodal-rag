@@ -27,7 +27,10 @@ def insert_document(
     metadata: dict,
     embedding: list[float],
     file_data: str | None = None,
+    user_id: str | None = None,
+    authed_client: Client | None = None,
 ) -> dict:
+    client = authed_client or get_client()
     row = {
         "title": title,
         "content_type": content_type,
@@ -38,8 +41,9 @@ def insert_document(
         "metadata": metadata,
         "embedding": embedding,
         "file_data": file_data,
+        "user_id": user_id,
     }
-    result = get_client().table("documents").insert(row).execute()
+    result = client.table("documents").insert(row).execute()
     return result.data[0]
 
 
@@ -48,8 +52,10 @@ def search_documents(
     match_threshold: float = 0.5,
     match_count: int = 10,
     filter_type: str | None = None,
+    authed_client: Client | None = None,
 ) -> list[dict]:
-    result = get_client().rpc(
+    client = authed_client or get_client()
+    result = client.rpc(
         "match_documents",
         {
             "query_embedding": query_embedding,
@@ -61,9 +67,10 @@ def search_documents(
     return result.data
 
 
-def get_all_documents() -> list[dict]:
+def get_all_documents(authed_client: Client | None = None) -> list[dict]:
+    client = authed_client or get_client()
     result = (
-        get_client()
+        client
         .table("documents")
         .select("id, title, content_type, original_filename, chunk_index, chunk_total, created_at")
         .order("created_at", desc=True)
@@ -72,15 +79,45 @@ def get_all_documents() -> list[dict]:
     return result.data
 
 
-def delete_document(doc_id: str) -> None:
-    get_client().table("documents").delete().eq("id", doc_id).execute()
+def delete_document(doc_id: str, authed_client: Client | None = None) -> None:
+    client = authed_client or get_client()
+    client.table("documents").delete().eq("id", doc_id).execute()
 
 
-def get_stats() -> dict:
-    rows = get_all_documents()
+def get_stats(authed_client: Client | None = None) -> dict:
+    rows = get_all_documents(authed_client=authed_client)
     total = len(rows)
     by_type: dict[str, int] = {}
     for r in rows:
         ct = r["content_type"]
         by_type[ct] = by_type.get(ct, 0) + 1
     return {"total": total, "by_type": by_type}
+
+
+def get_user_settings(authed_client: Client, user_id: str) -> dict | None:
+    result = (
+        authed_client
+        .table("user_settings")
+        .select("*")
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    return result.data[0] if result.data else None
+
+
+def upsert_user_settings(authed_client: Client, user_id: str, settings: dict) -> dict:
+    row = {
+        "user_id": user_id,
+        "llm_provider": settings.get("provider", "gemini"),
+        "llm_model": settings.get("model", "gemini-2.0-flash-lite"),
+        "llm_api_key": settings.get("api_key", ""),
+        "ollama_url": settings.get("ollama_url", "http://localhost:11434"),
+    }
+    result = (
+        authed_client
+        .table("user_settings")
+        .upsert(row, on_conflict="user_id")
+        .execute()
+    )
+    return result.data[0]

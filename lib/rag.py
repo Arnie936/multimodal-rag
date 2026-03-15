@@ -55,6 +55,8 @@ def ingest(
     title: str,
     mime_type: str,
     on_progress=None,
+    authed_client=None,
+    user_id: str | None = None,
 ) -> list[dict]:
     """Embed and store a file. Returns list of inserted document rows."""
     content_type = detect_content_type(mime_type, filename)
@@ -80,6 +82,8 @@ def ingest(
                 text_content=chunk_text,
                 metadata={"char_count": len(chunk_text)},
                 embedding=vec,
+                user_id=user_id,
+                authed_client=authed_client,
             )
             results.append(row)
 
@@ -97,16 +101,18 @@ def ingest(
             metadata={"mime_type": mime_type, "size_bytes": len(file_bytes)},
             embedding=vec,
             file_data=b64,
+            user_id=user_id,
+            authed_client=authed_client,
         )
         results.append(row)
 
     elif content_type == "pdf":
         pdf_chunks = chunker.chunk_pdf(file_bytes)
         total = len(pdf_chunks)
-        for i, pdf_bytes in enumerate(pdf_chunks):
+        for i, pdf_chunk_bytes in enumerate(pdf_chunks):
             _progress(f"Embedding PDF chunk {i+1}/{total}")
-            text = chunker.extract_pdf_text(pdf_bytes)
-            vec = embedder.embed_pdf_page_bytes(pdf_bytes)
+            text = chunker.extract_pdf_text(pdf_chunk_bytes)
+            vec = embedder.embed_pdf_page_bytes(pdf_chunk_bytes)
             row = db.insert_document(
                 title=title,
                 content_type="pdf",
@@ -114,8 +120,10 @@ def ingest(
                 chunk_index=i,
                 chunk_total=total,
                 text_content=text[:10000] if text else None,
-                metadata={"chunk_pages": len(pdf_bytes)},
+                metadata={"chunk_pages": min(5, total - i * 5)},
                 embedding=vec,
+                user_id=user_id,
+                authed_client=authed_client,
             )
             results.append(row)
 
@@ -135,6 +143,8 @@ def ingest(
                 text_content=None,
                 metadata={"format": fmt, "chunk_seconds": 75},
                 embedding=vec,
+                user_id=user_id,
+                authed_client=authed_client,
             )
             results.append(row)
 
@@ -156,6 +166,8 @@ def ingest(
                 metadata={"format": suffix, "chunk_seconds": 120, "mime_type": mime_type},
                 embedding=vec,
                 file_data=b64,
+                user_id=user_id,
+                authed_client=authed_client,
             )
             results.append(row)
 
@@ -168,6 +180,8 @@ def query(
     threshold: float = 0.5,
     filter_type: str | None = None,
     use_codex: bool = True,
+    authed_client=None,
+    llm_settings: dict | None = None,
 ) -> dict:
     """Run the full RAG pipeline: embed query -> search -> reason."""
     query_vec = embedder.embed_query(query_text)
@@ -176,8 +190,14 @@ def query(
         match_threshold=threshold,
         match_count=top_k,
         filter_type=filter_type if filter_type != "all" else None,
+        authed_client=authed_client,
     )
     answer = None
     if use_codex and matches:
-        answer = codex.reason(query_text, matches)
+        if llm_settings:
+            from lib.llm import get_provider
+            provider = get_provider(llm_settings)
+            answer = provider.reason(query_text, matches)
+        else:
+            answer = codex.reason(query_text, matches)
     return {"answer": answer, "sources": matches}
