@@ -18,53 +18,23 @@ A SaaS-ready Retrieval-Augmented Generation application that embeds multiple con
    SUPABASE_ANON_KEY=your-anon-key  # required for user auth
    ```
 
-3. Run the Supabase migrations (Supabase Dashboard → SQL Editor):
+3. Add `DATABASE_URL` to your `.env` file (needed once for the setup script):
 
-   ```sql
-   -- Add user_id to documents
-   ALTER TABLE documents
-     ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
-   CREATE INDEX IF NOT EXISTS idx_documents_user_id ON documents(user_id);
-
-   -- User settings table
-   CREATE TABLE IF NOT EXISTS user_settings (
-     user_id      UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-     llm_provider TEXT NOT NULL DEFAULT 'gemini',
-     llm_model    TEXT NOT NULL DEFAULT 'gemini-2.0-flash-lite',
-     llm_api_key  TEXT NOT NULL DEFAULT '',
-     ollama_url   TEXT NOT NULL DEFAULT 'http://localhost:11434',
-     updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
-   );
-
-   -- Enable Row Level Security
-   ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
-   ALTER TABLE user_settings ENABLE ROW LEVEL SECURITY;
-
-   CREATE POLICY "users_own_documents" ON documents
-     FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
-   CREATE POLICY "users_own_settings" ON user_settings
-     FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
-
-   -- Update RPC to respect RLS
-   CREATE OR REPLACE FUNCTION match_documents(
-     query_embedding vector(3072), match_threshold float,
-     match_count int, filter_type text DEFAULT NULL
-   )
-   RETURNS TABLE (id uuid, title text, content_type text, original_filename text,
-     chunk_index int, chunk_total int, text_content text,
-     metadata jsonb, file_data text, similarity float)
-   LANGUAGE sql SECURITY INVOKER AS $$
-     SELECT id, title, content_type, original_filename,
-            chunk_index, chunk_total, text_content, metadata, file_data,
-            1 - (embedding <=> query_embedding) AS similarity
-     FROM documents
-     WHERE 1 - (embedding <=> query_embedding) > match_threshold
-       AND (filter_type IS NULL OR content_type = filter_type)
-     ORDER BY embedding <=> query_embedding LIMIT match_count;
-   $$;
+   ```
+   DATABASE_URL=postgresql://postgres:[password]@db.[project-ref].supabase.co:5432/postgres
    ```
 
-4. Run the app:
+   > Find it at: **Supabase Dashboard → Settings → Database → Connection string (URI)**
+
+4. Run the database setup script (creates all tables, indexes, RLS policies, and the RPC):
+
+   ```bash
+   python setup_db.py
+   ```
+
+   The script is idempotent — safe to run multiple times.
+
+5. Run the app:
    ```bash
    streamlit run app.py
    ```
