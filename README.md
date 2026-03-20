@@ -16,7 +16,8 @@ server for programmatic access.
    pip install -r requirements.txt
    ```
 
-2. Create a `.env` file with your API keys:
+2. Create a `.env` file with your API keys
+   (see `.env.example`):
 
    ```text
    GEMINI_API_KEY=your-key
@@ -24,7 +25,12 @@ server for programmatic access.
    SUPABASE_SERVICE_KEY=your-key
    ```
 
-3. Run the app:
+3. Set up the Supabase database — run `schema.sql`
+   in the Supabase SQL Editor (or via `psql`).
+   This creates the `documents` table, enables
+   pgvector, and adds the required RPC functions.
+
+4. Run the app:
 
    ```bash
    streamlit run app.py
