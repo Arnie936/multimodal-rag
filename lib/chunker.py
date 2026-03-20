@@ -23,31 +23,24 @@ def chunk_text(text: str, max_tokens: int = 6000, overlap: int = 500) -> list[st
 
 def chunk_pdf(pdf_bytes: bytes, max_pages: int = 5) -> list[bytes]:
     """Split a PDF into sub-PDFs of at most max_pages pages. Returns list of PDF bytes."""
-    src = fitz.open(stream=pdf_bytes, filetype="pdf")
-    total = len(src)
-    if total <= max_pages:
-        src.close()
-        return [pdf_bytes]
-    chunks = []
-    for start in range(0, total, max_pages):
-        end = min(start + max_pages, total)
-        dst = fitz.open()
-        dst.insert_pdf(src, from_page=start, to_page=end - 1)
-        buf = dst.tobytes()
-        dst.close()
-        chunks.append(buf)
-    src.close()
-    return chunks
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as src:
+        total = len(src)
+        if total <= max_pages:
+            return [pdf_bytes]
+        chunks = []
+        for start in range(0, total, max_pages):
+            end = min(start + max_pages, total)
+            with fitz.open() as dst:
+                dst.insert_pdf(src, from_page=start, to_page=end - 1)
+                chunks.append(dst.tobytes())
+        return chunks
 
 
-def extract_pdf_text(pdf_bytes: bytes) -> str:
-    """Extract all text from a PDF."""
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    text = ""
-    for page in doc:
-        text += page.get_text()
-    doc.close()
-    return text
+def extract_pdf_text(pdf_bytes: bytes) -> tuple[str, int]:
+    """Extract all text and page count from a PDF."""
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+        text = "".join(page.get_text() for page in doc)
+        return text, len(doc)
 
 
 def chunk_audio(audio_bytes: bytes, fmt: str = "mp3", max_seconds: int = 75) -> list[bytes]:
@@ -85,19 +78,20 @@ def chunk_video(video_bytes: bytes, suffix: str = ".mp4", max_seconds: int = 120
             return [video_bytes]
         chunks = []
         t = 0
-        idx = 0
         while t < duration:
             end = min(t + max_seconds, duration)
             sub = clip.subclipped(t, end)
             tmp_out = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            tmp_out_name = tmp_out.name
             tmp_out.close()
-            sub.write_videofile(tmp_out.name, logger=None)
-            with open(tmp_out.name, "rb") as f:
-                chunks.append(f.read())
-            os.unlink(tmp_out.name)
+            try:
+                sub.write_videofile(tmp_out_name, logger=None)
+                with open(tmp_out_name, "rb") as f:
+                    chunks.append(f.read())
+            finally:
+                os.unlink(tmp_out_name)
             sub.close()
             t = end
-            idx += 1
         clip.close()
         return chunks
     finally:

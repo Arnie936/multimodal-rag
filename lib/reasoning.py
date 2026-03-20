@@ -1,18 +1,7 @@
-import os
-from google import genai
 from google.genai import types
-from dotenv import load_dotenv
+from lib.gemini_client import get_client
 
-load_dotenv()
-
-_client: genai.Client | None = None
-
-
-def get_client() -> genai.Client:
-    global _client
-    if _client is None:
-        _client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    return _client
+REASONING_MODEL = "gemini-3.1-flash-lite-preview"
 
 
 def reason(query: str, context_chunks: list[dict]) -> str:
@@ -35,10 +24,10 @@ def reason(query: str, context_chunks: list[dict]) -> str:
     )
 
     response = get_client().models.generate_content(
-        model="gemini-3.1-flash-lite-preview",
+        model=REASONING_MODEL,
         contents=f"Context:\n{context_str}\n\nQuestion: {query}",
         config=types.GenerateContentConfig(
             system_instruction=system_instruction,
         ),
     )
-    return response.text
+    return response.text or ""

@@ -1,8 +1,5 @@
 import os
 from supabase import create_client, Client
-from dotenv import load_dotenv
-
-load_dotenv()
 
 _client: Client | None = None
 
@@ -66,25 +63,29 @@ def search_documents(
 
 
 def get_all_documents() -> list[dict]:
-    result = (
-        get_client()
-        .table("documents")
-        .select("id, title, content_type, original_filename, chunk_index, chunk_total, collection, created_at")
-        .order("created_at", desc=True)
-        .execute()
-    )
-    return result.data
+    all_rows = []
+    offset = 0
+    page_size = 1000
+    while True:
+        result = (
+            get_client()
+            .table("documents")
+            .select("id, title, content_type, original_filename, chunk_index, chunk_total, collection, created_at")
+            .order("created_at", desc=True)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        all_rows.extend(result.data)
+        if len(result.data) < page_size:
+            break
+        offset += page_size
+    return all_rows
 
 
 def get_collections() -> list[str]:
-    """Return sorted list of distinct collection names."""
-    result = (
-        get_client()
-        .table("documents")
-        .select("collection")
-        .execute()
-    )
-    return sorted(set(r["collection"] for r in result.data))
+    """Return sorted list of distinct collection names via RPC."""
+    result = get_client().rpc("get_distinct_collections").execute()
+    return [r["collection"] for r in result.data]
 
 
 def get_existing_chunks(original_filename: str) -> set[int]:
@@ -116,10 +117,8 @@ def delete_by_filename(original_filename: str) -> int:
 
 
 def get_stats() -> dict:
-    rows = get_all_documents()
-    total = len(rows)
-    by_type: dict[str, int] = {}
-    for r in rows:
-        ct = r["content_type"]
-        by_type[ct] = by_type.get(ct, 0) + 1
+    """Return total count and per-type breakdown via RPC."""
+    result = get_client().rpc("get_document_stats").execute()
+    by_type = {r["content_type"]: r["cnt"] for r in result.data}
+    total = sum(by_type.values())
     return {"total": total, "by_type": by_type}

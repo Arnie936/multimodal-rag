@@ -1,6 +1,5 @@
 from __future__ import annotations
 import base64
-import fitz
 from lib import embedder, db, reasoning, chunker
 
 MIME_MAP = {
@@ -37,7 +36,7 @@ def detect_content_type(mime: str, filename: str) -> str:
     if mime in MIME_MAP:
         return MIME_MAP[mime]
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    if ext == "txt":
+    if ext in ("txt", "md"):
         return "text"
     if ext in ("png", "jpg", "jpeg", "webp", "gif"):
         return "image"
@@ -67,28 +66,33 @@ def ingest(
         if on_progress:
             on_progress(msg, current, total)
 
+    BATCH_SIZE = 10
+
     if content_type == "text":
         text = file_bytes.decode("utf-8", errors="replace")
         chunks = chunker.chunk_text(text)
         total = len(chunks)
-        for i, chunk_text in enumerate(chunks):
-            if i in existing:
-                _progress(f"Skipping text chunk {i+1}/{total} (exists)", i + 1, total)
-                continue
-            _progress(f"Embedding text chunk {i+1}/{total}", i + 1, total)
-            vec = embedder.embed_text(chunk_text)
-            row = db.insert_document(
-                title=title,
-                content_type="text",
-                original_filename=filename,
-                chunk_index=i,
-                chunk_total=total,
-                text_content=chunk_text,
-                metadata={"char_count": len(chunk_text)},
-                embedding=vec,
-                collection=collection,
-            )
-            results.append(row)
+        # Collect chunks to embed in batches
+        to_embed = [(i, ct) for i, ct in enumerate(chunks) if i not in existing]
+        for skip_i in (i for i in range(total) if i in existing):
+            _progress(f"Skipping text chunk {skip_i+1}/{total} (exists)", skip_i + 1, total)
+        for batch_start in range(0, len(to_embed), BATCH_SIZE):
+            batch = to_embed[batch_start:batch_start + BATCH_SIZE]
+            _progress(f"Embedding text chunks {batch[0][0]+1}-{batch[-1][0]+1}/{total}", batch[-1][0] + 1, total)
+            vecs = embedder.embed_batch([ct for _, ct in batch])
+            for (i, chunk_text), vec in zip(batch, vecs):
+                row = db.insert_document(
+                    title=title,
+                    content_type="text",
+                    original_filename=filename,
+                    chunk_index=i,
+                    chunk_total=total,
+                    text_content=chunk_text,
+                    metadata={"char_count": len(chunk_text)},
+                    embedding=vec,
+                    collection=collection,
+                )
+                results.append(row)
 
     elif content_type == "image":
         if 0 in existing:
@@ -112,28 +116,54 @@ def ingest(
             results.append(row)
 
     elif content_type == "pdf":
+        from google.genai import types as gtypes
         pdf_chunks = chunker.chunk_pdf(file_bytes)
         total = len(pdf_chunks)
+        # Extract text and filter existing
+        to_embed = []
         for i, pdf_bytes in enumerate(pdf_chunks):
             if i in existing:
                 _progress(f"Skipping PDF chunk {i+1}/{total} (exists)", i + 1, total)
                 continue
-            _progress(f"Embedding PDF chunk {i+1}/{total}", i + 1, total)
-            text = chunker.extract_pdf_text(pdf_bytes)
-            page_count = len(fitz.open(stream=pdf_bytes, filetype="pdf"))
-            vec = embedder.embed_pdf_page_bytes(pdf_bytes)
-            row = db.insert_document(
-                title=title,
-                content_type="pdf",
-                original_filename=filename,
-                chunk_index=i,
-                chunk_total=total,
-                text_content=text[:10000] if text else None,
-                metadata={"chunk_pages": page_count},
-                embedding=vec,
-                collection=collection,
+            text, page_count = chunker.extract_pdf_text(pdf_bytes)
+            to_embed.append((i, pdf_bytes, text, page_count))
+        # Batch embed PDF parts
+        for batch_start in range(0, len(to_embed), BATCH_SIZE):
+            batch = to_embed[batch_start:batch_start + BATCH_SIZE]
+            _progress(
+                f"Embedding PDF chunks {batch[0][0]+1}-{batch[-1][0]+1}/{total}",
+                batch[-1][0] + 1, total,
             )
-            results.append(row)
+            parts = [
+                gtypes.Part.from_bytes(data=pb, mime_type="application/pdf")
+                for _, pb, _, _ in batch
+            ]
+            try:
+                vecs = embedder.embed_batch(parts)
+            except Exception:
+                # Batch failed — fall back to individual text embeds
+                print(f"PDF batch embed failed, falling back to text")
+                vecs = []
+                for _, _, text, _ in batch:
+                    if text and text.strip():
+                        vecs.append(embedder.embed_text(text[:8000]))
+                    else:
+                        vecs.append(None)
+            for (i, _, text, page_count), vec in zip(batch, vecs):
+                if vec is None:
+                    continue
+                row = db.insert_document(
+                    title=title,
+                    content_type="pdf",
+                    original_filename=filename,
+                    chunk_index=i,
+                    chunk_total=total,
+                    text_content=text[:10000] if text else None,
+                    metadata={"chunk_pages": page_count},
+                    embedding=vec,
+                    collection=collection,
+                )
+                results.append(row)
 
     elif content_type == "audio":
         fmt = AUDIO_FMT.get(mime_type, "mp3")
@@ -145,6 +175,7 @@ def ingest(
                 continue
             _progress(f"Embedding audio chunk {i+1}/{total}", i + 1, total)
             vec = embedder.embed_audio(chunk_bytes, mime_type=mime_type)
+            b64 = base64.b64encode(chunk_bytes).decode("ascii")
             row = db.insert_document(
                 title=title,
                 content_type="audio",
@@ -152,9 +183,10 @@ def ingest(
                 chunk_index=i,
                 chunk_total=total,
                 text_content=None,
-                metadata={"format": fmt, "chunk_seconds": 75},
+                metadata={"format": fmt, "chunk_seconds": 75, "mime_type": mime_type},
                 embedding=vec,
                 collection=collection,
+                file_data=b64,
             )
             results.append(row)
 

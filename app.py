@@ -13,14 +13,18 @@ st.title("Multimodal RAG with Gemini Embedding")
 with st.sidebar:
     st.header("Settings")
     top_k = st.slider("Top K results", 1, 50, 10)
-    threshold = st.slider("Similarity threshold", 0.0, 1.0, 0.5, 0.05)
+    threshold = st.slider("Similarity threshold", 0.0, 1.0, 0.3, 0.05)
     filter_type = st.selectbox(
         "Content type filter",
         ["all", "text", "image", "pdf", "audio", "video"],
     )
 
+    @st.cache_data(ttl=60)
+    def _collections():
+        return db.get_collections()
+
     try:
-        collections = db.get_collections()
+        collections = _collections()
     except Exception:
         collections = []
     filter_collection = st.selectbox(
@@ -55,7 +59,7 @@ with tab_upload:
     st.subheader("Upload files to embed")
     uploaded_files = st.file_uploader(
         "Choose one or more files",
-        type=["txt", "png", "jpg", "jpeg", "webp", "gif", "pdf", "mp3", "wav", "mp4", "mov", "avi"],
+        type=["txt", "md", "png", "jpg", "jpeg", "webp", "gif", "pdf", "mp3", "wav", "mp4", "mov", "avi"],
         accept_multiple_files=True,
     )
     title = st.text_input("Document title (applied to all files)", placeholder="My document")
@@ -94,6 +98,7 @@ with tab_upload:
                     raise
             st.success(f"Stored {total_stored} chunk(s) across {len(uploaded_files)} file(s)")
             st.cache_data.clear()
+            st.rerun()
     elif uploaded_files and (not title or not col_choice):
         st.warning("Please enter a document title and select a collection.")
 
