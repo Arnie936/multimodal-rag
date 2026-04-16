@@ -163,6 +163,44 @@ def download_file(path: str) -> bytes:
     )
 
 
+def export_collection(collection: str) -> list[dict]:
+    """Export all documents in a collection with embeddings."""
+    all_rows = []
+    offset = 0
+    page_size = 200
+    while True:
+        result = (
+            get_client()
+            .table("documents")
+            .select("*")
+            .eq("collection", collection)
+            .order("original_filename")
+            .order("chunk_index")
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        all_rows.extend(result.data)
+        if len(result.data) < page_size:
+            break
+        offset += page_size
+    return all_rows
+
+
+def import_documents(rows: list[dict]) -> int:
+    """Import documents from export data. Skips existing chunks."""
+    imported = 0
+    for row in rows:
+        existing = get_existing_chunks(row["original_filename"])
+        if row["chunk_index"] in existing:
+            continue
+        # Remove id and created_at so DB generates new ones
+        row.pop("id", None)
+        row.pop("created_at", None)
+        get_client().table("documents").insert(row).execute()
+        imported += 1
+    return imported
+
+
 def get_stats() -> dict:
     """Return total count and per-type breakdown via RPC."""
     result = get_client().rpc("get_document_stats").execute()

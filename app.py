@@ -251,3 +251,33 @@ with tab_browse:
                     st.error(f"Delete error: {e}")
             else:
                 st.warning("Enter a document ID.")
+
+        st.divider()
+        st.subheader("Export / Import")
+
+        export_col = st.selectbox(
+            "Export collection", browse_cols, key="export_col",
+        )
+        if st.button("Export as JSON"):
+            import json
+            with st.spinner("Exporting..."):
+                data = db.export_collection(export_col)
+            st.download_button(
+                f"Download {export_col} ({len(data)} chunks)",
+                data=json.dumps(data, ensure_ascii=False, default=str),
+                file_name=f"{export_col}.json",
+                mime="application/json",
+            )
+
+        import_file = st.file_uploader(
+            "Import collection from JSON",
+            type=["json"], key="import_file",
+        )
+        if import_file and st.button("Import"):
+            import json
+            with st.spinner("Importing..."):
+                rows = json.loads(import_file.read())
+                count = db.import_documents(rows)
+            st.success(f"Imported {count} new chunk(s)")
+            st.cache_data.clear()
+            st.rerun()
