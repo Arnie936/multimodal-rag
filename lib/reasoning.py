@@ -20,7 +20,8 @@ def reason(query: str, context_chunks: list[dict]) -> str:
     system_instruction = (
         "You are a helpful assistant that answers questions based on the provided context. "
         "Cite your sources by referencing the source numbers [Source N]. "
-        "If the context doesn't contain enough information, say so clearly."
+        "If the context doesn't contain enough information, say so clearly. "
+        "Always respond in the same language as the user's question."
     )
 
     response = get_client().models.generate_content(

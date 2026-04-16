@@ -167,8 +167,34 @@ with tab_browse:
     if not docs:
         st.info("No documents yet. Upload something in the first tab.")
     else:
+        col1, col2 = st.columns(2)
+        with col1:
+            browse_search = st.text_input(
+                "Filter by filename or title", key="browse_search",
+            )
+        with col2:
+            browse_cols = sorted({d["collection"] for d in docs})
+            browse_col = st.selectbox(
+                "Filter by collection",
+                ["all"] + browse_cols, key="browse_col",
+            )
+
+        filtered = docs
+        if browse_search:
+            q = browse_search.lower()
+            filtered = [
+                d for d in filtered
+                if q in d["original_filename"].lower()
+                or q in d["title"].lower()
+            ]
+        if browse_col != "all":
+            filtered = [
+                d for d in filtered if d["collection"] == browse_col
+            ]
+
+        st.caption(f"{len(filtered)} of {len(docs)} chunks")
         st.dataframe(
-            docs,
+            filtered,
             width="stretch",
             column_config={
                 "id": st.column_config.TextColumn("ID", width="small"),
