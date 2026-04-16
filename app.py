@@ -33,6 +33,7 @@ with st.sidebar:
     )
 
     use_reasoning = st.checkbox("Use reasoning", value=True)
+    use_hybrid = st.checkbox("Hybrid search (vector + text)", value=False)
 
     st.divider()
     st.header("Database Stats")
@@ -120,6 +121,7 @@ with tab_search:
                         filter_type=filter_type,
                         filter_collection=filter_collection,
                         use_reasoning=use_reasoning,
+                        use_hybrid=use_hybrid,
                     )
                 except Exception as e:
                     st.error(f"Search error: {e}")

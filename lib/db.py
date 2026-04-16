@@ -62,6 +62,32 @@ def search_documents(
     return result.data
 
 
+def hybrid_search(
+    query_text: str,
+    query_embedding: list[float],
+    match_threshold: float = 0.3,
+    match_count: int = 10,
+    filter_type: str | None = None,
+    filter_collection: str | None = None,
+    vector_weight: float = 0.7,
+    text_weight: float = 0.3,
+) -> list[dict]:
+    result = get_client().rpc(
+        "hybrid_search",
+        {
+            "query_text": query_text,
+            "query_embedding": query_embedding,
+            "match_threshold": match_threshold,
+            "match_count": match_count,
+            "filter_type": filter_type,
+            "filter_collection": filter_collection,
+            "vector_weight": vector_weight,
+            "text_weight": text_weight,
+        },
+    ).execute()
+    return result.data
+
+
 def get_all_documents() -> list[dict]:
     all_rows = []
     offset = 0

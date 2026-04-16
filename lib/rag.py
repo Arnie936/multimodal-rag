@@ -229,16 +229,31 @@ def query(
     filter_type: str | None = None,
     filter_collection: str | None = None,
     use_reasoning: bool = True,
+    use_hybrid: bool = False,
 ) -> dict:
     """Run the full RAG pipeline: embed query -> search -> reason."""
     query_vec = embedder.embed_query(query_text)
-    matches = db.search_documents(
-        query_embedding=query_vec,
-        match_threshold=threshold,
-        match_count=top_k,
-        filter_type=filter_type if filter_type != "all" else None,
-        filter_collection=filter_collection if filter_collection != "all" else None,
-    )
+    f_type = filter_type if filter_type != "all" else None
+    f_coll = filter_collection if filter_collection != "all" else None
+
+    if use_hybrid:
+        matches = db.hybrid_search(
+            query_text=query_text,
+            query_embedding=query_vec,
+            match_threshold=threshold,
+            match_count=top_k,
+            filter_type=f_type,
+            filter_collection=f_coll,
+        )
+    else:
+        matches = db.search_documents(
+            query_embedding=query_vec,
+            match_threshold=threshold,
+            match_count=top_k,
+            filter_type=f_type,
+            filter_collection=f_coll,
+        )
+
     answer = None
     if use_reasoning and matches:
         answer = reasoning.reason(query_text, matches)
