@@ -141,12 +141,28 @@ with tab_search:
                     expanded=src["content_type"] in ("image", "video"),
                 ):
                     if src["content_type"] == "image" and src.get("file_data"):
-                        img_bytes = base64.b64decode(src["file_data"])
-                        st.image(img_bytes, caption=src["original_filename"], width="stretch")
+                        file_data = src["file_data"]
+                        if file_data.startswith("storage:"):
+                            url = db.get_file_url(file_data[8:])
+                            st.image(url, caption=src["original_filename"], width="stretch")
+                        else:
+                            st.image(base64.b64decode(file_data), caption=src["original_filename"], width="stretch")
                     elif src["content_type"] == "video" and src.get("file_data"):
-                        vid_bytes = base64.b64decode(src["file_data"])
+                        file_data = src["file_data"]
                         mime = (src.get("metadata") or {}).get("mime_type", "video/mp4")
-                        st.video(vid_bytes, format=mime)
+                        if file_data.startswith("storage:"):
+                            url = db.get_file_url(file_data[8:])
+                            st.video(url, format=mime)
+                        else:
+                            st.video(base64.b64decode(file_data), format=mime)
+                    elif src["content_type"] == "audio" and src.get("file_data"):
+                        file_data = src["file_data"]
+                        mime = (src.get("metadata") or {}).get("mime_type", "audio/mpeg")
+                        if file_data.startswith("storage:"):
+                            audio_bytes = db.download_file(file_data[8:])
+                            st.audio(audio_bytes, format=mime)
+                        else:
+                            st.audio(base64.b64decode(file_data), format=mime)
                     elif src.get("text_content"):
                         st.text(src["text_content"][:2000])
                     else:

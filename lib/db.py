@@ -116,6 +116,53 @@ def delete_by_filename(original_filename: str) -> int:
     return len(result.data)
 
 
+STORAGE_BUCKET = "rag-media"
+
+
+def ensure_storage_bucket() -> None:
+    """Create the storage bucket if it doesn't exist."""
+    client = get_client()
+    try:
+        client.storage.get_bucket(STORAGE_BUCKET)
+    except Exception:
+        client.storage.create_bucket(
+            STORAGE_BUCKET,
+            options={"public": True},
+        )
+
+
+def upload_file(data: bytes, path: str, mime_type: str) -> str:
+    """Upload binary data to storage. Returns the storage path."""
+    ensure_storage_bucket()
+    get_client().storage.from_(STORAGE_BUCKET).upload(
+        path=path,
+        file=data,
+        file_options={
+            "content-type": mime_type,
+            "upsert": "true",
+        },
+    )
+    return path
+
+
+def get_file_url(path: str) -> str:
+    """Get public URL for a storage file."""
+    return (
+        get_client()
+        .storage.from_(STORAGE_BUCKET)
+        .get_public_url(path)
+    )
+
+
+def download_file(path: str) -> bytes:
+    """Download file bytes from storage."""
+    return (
+        get_client()
+        .storage.from_(STORAGE_BUCKET)
+        .download(path)
+    )
+
+
 def get_stats() -> dict:
     """Return total count and per-type breakdown via RPC."""
     result = get_client().rpc("get_document_stats").execute()
