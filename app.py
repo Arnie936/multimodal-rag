@@ -53,7 +53,7 @@ with st.sidebar:
         st.error(f"Could not load stats: {e}")
 
 # ── Tabs ─────────────────────────────────────────────────────────────────────
-tab_upload, tab_search, tab_browse = st.tabs(["Upload & Embed", "Search", "Browse"])
+tab_upload, tab_search, tab_chat, tab_browse = st.tabs(["Upload & Embed", "Search", "Chat", "Browse"])
 
 # ── Tab 1: Upload & Embed ───────────────────────────────────────────────────
 with tab_upload:
@@ -172,7 +172,76 @@ with tab_search:
                     if src.get("metadata"):
                         st.json(src["metadata"])
 
-# ── Tab 3: Browse ───────────────────────────────────────────────────────────
+# ── Tab 3: Chat ────────────────────────────────────────────────────────────
+with tab_chat:
+    st.subheader("Chat with your documents")
+
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+
+    # Display chat history
+    for msg in st.session_state.chat_history:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    if prompt := st.chat_input("Ask a question..."):
+        # Show user message
+        st.session_state.chat_history.append(
+            {"role": "user", "content": prompt}
+        )
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        # Build conversation context for reasoning
+        with st.chat_message("assistant"):
+            with st.spinner("Searching..."):
+                result = rag.query(
+                    query_text=prompt,
+                    top_k=top_k,
+                    threshold=threshold,
+                    filter_type=filter_type,
+                    filter_collection=filter_collection,
+                    use_reasoning=True,
+                    use_hybrid=use_hybrid,
+                )
+
+            answer = result.get("answer") or "No answer found."
+
+            # Append prior conversation as context
+            if len(st.session_state.chat_history) > 1:
+                prior = "\n".join(
+                    f"{m['role']}: {m['content']}"
+                    for m in st.session_state.chat_history[:-1]
+                )
+                from lib import reasoning as _r
+                answer = _r.reason_with_context(
+                    prompt, result["sources"], prior,
+                )
+
+            st.markdown(answer)
+
+            if result["sources"]:
+                with st.expander(
+                    f"Sources ({len(result['sources'])})"
+                ):
+                    for src in result["sources"]:
+                        sim = src.get("similarity", 0)
+                        st.caption(
+                            f"[{sim:.3f}] "
+                            f"{src['original_filename']} "
+                            f"({src['content_type']})"
+                        )
+
+        st.session_state.chat_history.append(
+            {"role": "assistant", "content": answer}
+        )
+
+    if st.session_state.chat_history:
+        if st.button("Clear chat", key="clear_chat"):
+            st.session_state.chat_history = []
+            st.rerun()
+
+# ── Tab 4: Browse ───────────────────────────────────────────────────────────
 with tab_browse:
     st.subheader("All documents")
 
