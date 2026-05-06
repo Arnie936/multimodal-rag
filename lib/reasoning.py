@@ -20,12 +20,56 @@ def reason(query: str, context_chunks: list[dict]) -> str:
     system_instruction = (
         "You are a helpful assistant that answers questions based on the provided context. "
         "Cite your sources by referencing the source numbers [Source N]. "
-        "If the context doesn't contain enough information, say so clearly."
+        "If the context doesn't contain enough information, say so clearly. "
+        "Always respond in the same language as the user's question."
     )
 
     response = get_client().models.generate_content(
         model=REASONING_MODEL,
         contents=f"Context:\n{context_str}\n\nQuestion: {query}",
+        config=types.GenerateContentConfig(
+            system_instruction=system_instruction,
+        ),
+    )
+    return response.text or ""
+
+
+def reason_with_context(
+    query: str,
+    context_chunks: list[dict],
+    conversation_history: str,
+) -> str:
+    """Reason with both document context and prior conversation."""
+    context_parts = []
+    for i, chunk in enumerate(context_chunks, 1):
+        source = chunk.get("original_filename", "unknown")
+        ctype = chunk.get("content_type", "unknown")
+        sim = chunk.get("similarity", 0)
+        text = chunk.get("text_content") or "(non-text content)"
+        context_parts.append(
+            f"[Source {i}] {source} ({ctype}, similarity: {sim:.3f})\n{text}"
+        )
+    context_str = "\n\n---\n\n".join(context_parts)
+
+    system_instruction = (
+        "You are a helpful assistant that answers questions "
+        "based on the provided context and conversation "
+        "history. Cite your sources by referencing the "
+        "source numbers [Source N]. If the context doesn't "
+        "contain enough information, say so clearly. "
+        "Always respond in the same language as the "
+        "user's question."
+    )
+
+    prompt = (
+        f"Conversation so far:\n{conversation_history}\n\n"
+        f"Document context:\n{context_str}\n\n"
+        f"Current question: {query}"
+    )
+
+    response = get_client().models.generate_content(
+        model=REASONING_MODEL,
+        contents=prompt,
         config=types.GenerateContentConfig(
             system_instruction=system_instruction,
         ),

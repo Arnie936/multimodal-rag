@@ -33,6 +33,7 @@ with st.sidebar:
     )
 
     use_reasoning = st.checkbox("Use reasoning", value=True)
+    use_hybrid = st.checkbox("Hybrid search (vector + text)", value=False)
 
     st.divider()
     st.header("Database Stats")
@@ -52,7 +53,7 @@ with st.sidebar:
         st.error(f"Could not load stats: {e}")
 
 # ── Tabs ─────────────────────────────────────────────────────────────────────
-tab_upload, tab_search, tab_browse = st.tabs(["Upload & Embed", "Search", "Browse"])
+tab_upload, tab_search, tab_chat, tab_browse = st.tabs(["Upload & Embed", "Search", "Chat", "Browse"])
 
 # ── Tab 1: Upload & Embed ───────────────────────────────────────────────────
 with tab_upload:
@@ -120,6 +121,7 @@ with tab_search:
                         filter_type=filter_type,
                         filter_collection=filter_collection,
                         use_reasoning=use_reasoning,
+                        use_hybrid=use_hybrid,
                     )
                 except Exception as e:
                     st.error(f"Search error: {e}")
@@ -141,12 +143,28 @@ with tab_search:
                     expanded=src["content_type"] in ("image", "video"),
                 ):
                     if src["content_type"] == "image" and src.get("file_data"):
-                        img_bytes = base64.b64decode(src["file_data"])
-                        st.image(img_bytes, caption=src["original_filename"], width="stretch")
+                        file_data = src["file_data"]
+                        if file_data.startswith("storage:"):
+                            url = db.get_file_url(file_data[8:])
+                            st.image(url, caption=src["original_filename"], width="stretch")
+                        else:
+                            st.image(base64.b64decode(file_data), caption=src["original_filename"], width="stretch")
                     elif src["content_type"] == "video" and src.get("file_data"):
-                        vid_bytes = base64.b64decode(src["file_data"])
+                        file_data = src["file_data"]
                         mime = (src.get("metadata") or {}).get("mime_type", "video/mp4")
-                        st.video(vid_bytes, format=mime)
+                        if file_data.startswith("storage:"):
+                            url = db.get_file_url(file_data[8:])
+                            st.video(url, format=mime)
+                        else:
+                            st.video(base64.b64decode(file_data), format=mime)
+                    elif src["content_type"] == "audio" and src.get("file_data"):
+                        file_data = src["file_data"]
+                        mime = (src.get("metadata") or {}).get("mime_type", "audio/mpeg")
+                        if file_data.startswith("storage:"):
+                            audio_bytes = db.download_file(file_data[8:])
+                            st.audio(audio_bytes, format=mime)
+                        else:
+                            st.audio(base64.b64decode(file_data), format=mime)
                     elif src.get("text_content"):
                         st.text(src["text_content"][:2000])
                     else:
@@ -154,7 +172,75 @@ with tab_search:
                     if src.get("metadata"):
                         st.json(src["metadata"])
 
-# ── Tab 3: Browse ───────────────────────────────────────────────────────────
+# ── Tab 3: Chat ────────────────────────────────────────────────────────────
+with tab_chat:
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+    if "chat_sources" not in st.session_state:
+        st.session_state.chat_sources = {}
+
+    # Display full chat history
+    for idx, msg in enumerate(st.session_state.chat_history):
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+            if msg["role"] == "assistant" and idx in st.session_state.chat_sources:
+                sources = st.session_state.chat_sources[idx]
+                with st.expander(f"Sources ({len(sources)})"):
+                    for src in sources:
+                        sim = src.get("similarity", 0)
+                        st.caption(
+                            f"[{sim:.3f}] "
+                            f"{src['original_filename']} "
+                            f"({src['content_type']})"
+                        )
+
+    if prompt := st.chat_input("Ask a question..."):
+        st.session_state.chat_history.append(
+            {"role": "user", "content": prompt}
+        )
+
+        # Build conversation context for follow-ups
+        prior = ""
+        if len(st.session_state.chat_history) > 1:
+            prior = "\n".join(
+                f"{m['role']}: {m['content']}"
+                for m in st.session_state.chat_history[:-1]
+            )
+
+        result = rag.query(
+            query_text=prompt,
+            top_k=top_k,
+            threshold=threshold,
+            filter_type=filter_type,
+            filter_collection=filter_collection,
+            use_reasoning=True,
+            use_hybrid=use_hybrid,
+        )
+
+        if prior and result["sources"]:
+            from lib import reasoning as _r
+            answer = _r.reason_with_context(
+                prompt, result["sources"], prior,
+            )
+        else:
+            answer = result.get("answer") or "No answer found."
+
+        assistant_idx = len(st.session_state.chat_history)
+        st.session_state.chat_history.append(
+            {"role": "assistant", "content": answer}
+        )
+        if result["sources"]:
+            st.session_state.chat_sources[assistant_idx] = result["sources"]
+
+        st.rerun()
+
+    if st.session_state.chat_history:
+        if st.button("Clear chat", key="clear_chat"):
+            st.session_state.chat_history = []
+            st.session_state.chat_sources = {}
+            st.rerun()
+
+# ── Tab 4: Browse ───────────────────────────────────────────────────────────
 with tab_browse:
     st.subheader("All documents")
 
@@ -167,8 +253,34 @@ with tab_browse:
     if not docs:
         st.info("No documents yet. Upload something in the first tab.")
     else:
+        col1, col2 = st.columns(2)
+        with col1:
+            browse_search = st.text_input(
+                "Filter by filename or title", key="browse_search",
+            )
+        with col2:
+            browse_cols = sorted({d["collection"] for d in docs})
+            browse_col = st.selectbox(
+                "Filter by collection",
+                ["all"] + browse_cols, key="browse_col",
+            )
+
+        filtered = docs
+        if browse_search:
+            q = browse_search.lower()
+            filtered = [
+                d for d in filtered
+                if q in d["original_filename"].lower()
+                or q in d["title"].lower()
+            ]
+        if browse_col != "all":
+            filtered = [
+                d for d in filtered if d["collection"] == browse_col
+            ]
+
+        st.caption(f"{len(filtered)} of {len(docs)} chunks")
         st.dataframe(
-            docs,
+            filtered,
             width="stretch",
             column_config={
                 "id": st.column_config.TextColumn("ID", width="small"),
@@ -209,3 +321,33 @@ with tab_browse:
                     st.error(f"Delete error: {e}")
             else:
                 st.warning("Enter a document ID.")
+
+        st.divider()
+        st.subheader("Export / Import")
+
+        export_col = st.selectbox(
+            "Export collection", browse_cols, key="export_col",
+        )
+        if st.button("Export as JSON"):
+            import json
+            with st.spinner("Exporting..."):
+                data = db.export_collection(export_col)
+            st.download_button(
+                f"Download {export_col} ({len(data)} chunks)",
+                data=json.dumps(data, ensure_ascii=False, default=str),
+                file_name=f"{export_col}.json",
+                mime="application/json",
+            )
+
+        import_file = st.file_uploader(
+            "Import collection from JSON",
+            type=["json"], key="import_file",
+        )
+        if import_file and st.button("Import"):
+            import json
+            with st.spinner("Importing..."):
+                rows = json.loads(import_file.read())
+                count = db.import_documents(rows)
+            st.success(f"Imported {count} new chunk(s)")
+            st.cache_data.clear()
+            st.rerun()

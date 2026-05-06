@@ -100,7 +100,9 @@ def ingest(
         else:
             _progress("Embedding image", 1, 1)
             vec = embedder.embed_image(file_bytes, mime_type=mime_type)
-            b64 = base64.b64encode(file_bytes).decode("ascii")
+            ext = filename.rsplit(".", 1)[-1] if "." in filename else "png"
+            storage_path = f"{collection}/{filename}"
+            db.upload_file(file_bytes, storage_path, mime_type)
             row = db.insert_document(
                 title=title,
                 content_type="image",
@@ -111,7 +113,7 @@ def ingest(
                 metadata={"mime_type": mime_type, "size_bytes": len(file_bytes)},
                 embedding=vec,
                 collection=collection,
-                file_data=b64,
+                file_data=f"storage:{storage_path}",
             )
             results.append(row)
 
@@ -175,7 +177,8 @@ def ingest(
                 continue
             _progress(f"Embedding audio chunk {i+1}/{total}", i + 1, total)
             vec = embedder.embed_audio(chunk_bytes, mime_type=mime_type)
-            b64 = base64.b64encode(chunk_bytes).decode("ascii")
+            storage_path = f"{collection}/{filename}_chunk{i}.{fmt}"
+            db.upload_file(chunk_bytes, storage_path, mime_type)
             row = db.insert_document(
                 title=title,
                 content_type="audio",
@@ -186,7 +189,7 @@ def ingest(
                 metadata={"format": fmt, "chunk_seconds": 75, "mime_type": mime_type},
                 embedding=vec,
                 collection=collection,
-                file_data=b64,
+                file_data=f"storage:{storage_path}",
             )
             results.append(row)
 
@@ -200,7 +203,8 @@ def ingest(
                 continue
             _progress(f"Embedding video chunk {i+1}/{total}", i + 1, total)
             vec = embedder.embed_video(chunk_bytes, mime_type=mime_type)
-            b64 = base64.b64encode(chunk_bytes).decode("ascii")
+            storage_path = f"{collection}/{filename}_chunk{i}{suffix}"
+            db.upload_file(chunk_bytes, storage_path, mime_type)
             row = db.insert_document(
                 title=title,
                 content_type="video",
@@ -211,7 +215,7 @@ def ingest(
                 metadata={"format": suffix, "chunk_seconds": 120, "mime_type": mime_type},
                 embedding=vec,
                 collection=collection,
-                file_data=b64,
+                file_data=f"storage:{storage_path}",
             )
             results.append(row)
 
@@ -225,16 +229,31 @@ def query(
     filter_type: str | None = None,
     filter_collection: str | None = None,
     use_reasoning: bool = True,
+    use_hybrid: bool = False,
 ) -> dict:
     """Run the full RAG pipeline: embed query -> search -> reason."""
     query_vec = embedder.embed_query(query_text)
-    matches = db.search_documents(
-        query_embedding=query_vec,
-        match_threshold=threshold,
-        match_count=top_k,
-        filter_type=filter_type if filter_type != "all" else None,
-        filter_collection=filter_collection if filter_collection != "all" else None,
-    )
+    f_type = filter_type if filter_type != "all" else None
+    f_coll = filter_collection if filter_collection != "all" else None
+
+    if use_hybrid:
+        matches = db.hybrid_search(
+            query_text=query_text,
+            query_embedding=query_vec,
+            match_threshold=threshold,
+            match_count=top_k,
+            filter_type=f_type,
+            filter_collection=f_coll,
+        )
+    else:
+        matches = db.search_documents(
+            query_embedding=query_vec,
+            match_threshold=threshold,
+            match_count=top_k,
+            filter_type=f_type,
+            filter_collection=f_coll,
+        )
+
     answer = None
     if use_reasoning and matches:
         answer = reasoning.reason(query_text, matches)

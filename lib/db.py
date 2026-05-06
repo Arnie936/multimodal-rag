@@ -62,6 +62,32 @@ def search_documents(
     return result.data
 
 
+def hybrid_search(
+    query_text: str,
+    query_embedding: list[float],
+    match_threshold: float = 0.3,
+    match_count: int = 10,
+    filter_type: str | None = None,
+    filter_collection: str | None = None,
+    vector_weight: float = 0.7,
+    text_weight: float = 0.3,
+) -> list[dict]:
+    result = get_client().rpc(
+        "hybrid_search",
+        {
+            "query_text": query_text,
+            "query_embedding": query_embedding,
+            "match_threshold": match_threshold,
+            "match_count": match_count,
+            "filter_type": filter_type,
+            "filter_collection": filter_collection,
+            "vector_weight": vector_weight,
+            "text_weight": text_weight,
+        },
+    ).execute()
+    return result.data
+
+
 def get_all_documents() -> list[dict]:
     all_rows = []
     offset = 0
@@ -114,6 +140,91 @@ def delete_by_filename(original_filename: str) -> int:
         .execute()
     )
     return len(result.data)
+
+
+STORAGE_BUCKET = "rag-media"
+
+
+def ensure_storage_bucket() -> None:
+    """Create the storage bucket if it doesn't exist."""
+    client = get_client()
+    try:
+        client.storage.get_bucket(STORAGE_BUCKET)
+    except Exception:
+        client.storage.create_bucket(
+            STORAGE_BUCKET,
+            options={"public": True},
+        )
+
+
+def upload_file(data: bytes, path: str, mime_type: str) -> str:
+    """Upload binary data to storage. Returns the storage path."""
+    ensure_storage_bucket()
+    get_client().storage.from_(STORAGE_BUCKET).upload(
+        path=path,
+        file=data,
+        file_options={
+            "content-type": mime_type,
+            "upsert": "true",
+        },
+    )
+    return path
+
+
+def get_file_url(path: str) -> str:
+    """Get public URL for a storage file."""
+    return (
+        get_client()
+        .storage.from_(STORAGE_BUCKET)
+        .get_public_url(path)
+    )
+
+
+def download_file(path: str) -> bytes:
+    """Download file bytes from storage."""
+    return (
+        get_client()
+        .storage.from_(STORAGE_BUCKET)
+        .download(path)
+    )
+
+
+def export_collection(collection: str) -> list[dict]:
+    """Export all documents in a collection with embeddings."""
+    all_rows = []
+    offset = 0
+    page_size = 200
+    while True:
+        result = (
+            get_client()
+            .table("documents")
+            .select("*")
+            .eq("collection", collection)
+            .order("original_filename")
+            .order("chunk_index")
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        all_rows.extend(result.data)
+        if len(result.data) < page_size:
+            break
+        offset += page_size
+    return all_rows
+
+
+def import_documents(rows: list[dict]) -> int:
+    """Import documents from export data. Skips existing chunks."""
+    imported = 0
+    for row in rows:
+        existing = get_existing_chunks(row["original_filename"])
+        if row["chunk_index"] in existing:
+            continue
+        # Remove id and created_at so DB generates new ones
+        row.pop("id", None)
+        row.pop("created_at", None)
+        get_client().table("documents").insert(row).execute()
+        imported += 1
+    return imported
 
 
 def get_stats() -> dict:
